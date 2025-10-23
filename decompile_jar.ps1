@@ -184,9 +184,51 @@ function Process-SingleJar {
         }
     }
 
-    # Step 6: Generate basic pom.xml for Maven project
-    Write-Host "Generating pom.xml..." -ForegroundColor Cyan
-    $PomContent = @"
+    # Step 6: Move configuration and resource files to resources
+    Write-Host "Checking for configuration and resource files..." -ForegroundColor Cyan
+    if (Test-Path $ClassesDir) {
+        # Find all .yml, .yaml, and .properties files
+        $ResourceFiles = Get-ChildItem -Path $ClassesDir -Include "*.yml", "*.yaml", "*.properties" -File -Recurse
+
+        foreach ($ResourceFile in $ResourceFiles) {
+            # Calculate relative path from classes directory
+            $RelativePath = $ResourceFile.FullName.Substring($ClassesDir.Length + 1)
+            $DestPath = Join-Path "$ProjectDir\src\main\resources" $RelativePath
+
+            # Create parent directory if needed
+            $DestDir = Split-Path $DestPath -Parent
+            if (-not (Test-Path $DestDir)) {
+                New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+            }
+
+            # Move the file
+            Move-Item $ResourceFile.FullName $DestPath -Force
+            Write-Host "Moved $RelativePath to src/main/resources" -ForegroundColor Green
+        }
+
+        if ($ResourceFiles.Count -gt 0) {
+            Write-Host "Moved $($ResourceFiles.Count) resource file(s)" -ForegroundColor Green
+        }
+    }
+
+    # Step 7: Use original pom.xml or generate basic one
+    Write-Host "Looking for original pom.xml..." -ForegroundColor Cyan
+
+    # Search for pom.xml in META-INF/maven directory
+    $MavenMetaDir = Join-Path "$ProjectDir\src\main\webapp" "META-INF\maven"
+    $OriginalPom = $null
+
+    if (Test-Path $MavenMetaDir) {
+        $OriginalPom = Get-ChildItem -Path $MavenMetaDir -Filter "pom.xml" -Recurse -File | Select-Object -First 1
+    }
+
+    if ($OriginalPom) {
+        Write-Host "Found original pom.xml at: $($OriginalPom.FullName)" -ForegroundColor Green
+        Copy-Item $OriginalPom.FullName "$ProjectDir\pom.xml" -Force
+        Write-Host "Using original pom.xml" -ForegroundColor Green
+    } else {
+        Write-Host "No original pom.xml found, generating basic pom.xml..." -ForegroundColor Cyan
+        $PomContent = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -239,9 +281,11 @@ function Process-SingleJar {
 </project>
 "@
 
-    Set-Content -Path "$ProjectDir\pom.xml" -Value $PomContent
+        Set-Content -Path "$ProjectDir\pom.xml" -Value $PomContent
+        Write-Host "Generated basic pom.xml" -ForegroundColor Green
+    }
 
-    # Step 7: Clean up temporary extraction directory
+    # Step 8: Clean up temporary extraction directory
     Write-Host "Cleaning up temporary files..." -ForegroundColor Cyan
     if (Test-Path $ExtractDir) {
         Remove-Item $ExtractDir -Recurse -Force
